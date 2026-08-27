@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
@@ -146,6 +147,20 @@ func TestEnsureImageGenerationTool_ResponsesLiteFalseMetadataStillInjectsTool(t 
 	}
 }
 
+func TestEnsureImageGenerationTool_ChatDisableHeaderDoesNotInjectTool(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":"hello"}`)
+	headers := make(http.Header)
+	headers.Set(helps.DisableImageGenerationHeader, "chat")
+
+	result := ensureImageGenerationTool(body, "gpt-5.6-sol", nil, headers)
+	if string(result) != string(body) {
+		t.Fatalf("expected chat-scoped disable body to be unchanged, got %s", string(result))
+	}
+	if gjson.GetBytes(result, "tools").Exists() {
+		t.Fatalf("expected no injected tools for chat-scoped disable request, got %s", gjson.GetBytes(result, "tools").Raw)
+	}
+}
+
 func TestEnsureImageGenerationTool_NoTools(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"draw a cat"}`)
 	result := ensureImageGenerationTool(body, "gpt-5.4", nil, nil)
@@ -212,6 +227,49 @@ func TestEnsureImageGenerationTool_FlattenedImageGenFunctionDoesNotInjectTool(t 
 
 	if string(result) != string(body) {
 		t.Fatalf("expected body to be unchanged, got %s", string(result))
+	}
+}
+
+func TestEnsureImageGenerationTool_ImageGenNamespaceRemovesHostedToolAndChoice(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","tool_choice":{"type":"image_generation"},"tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{}}]},{"type":"image_generation","output_format":"png"}]}`)
+	headers := make(http.Header)
+	headers.Set(codexResponsesLiteHeader, "true")
+	result := ensureImageGenerationTool(body, "gpt-5.6-sol", nil, headers)
+
+	tools := gjson.GetBytes(result, "tools").Array()
+	if len(tools) != 1 {
+		t.Fatalf("expected only the image_gen namespace, got %d tools: %s", len(tools), string(result))
+	}
+	if tools[0].Get("type").String() != "namespace" || tools[0].Get("name").String() != "image_gen" {
+		t.Fatalf("expected image_gen namespace to be preserved, got %s", tools[0].Raw)
+	}
+	if gjson.GetBytes(result, "tool_choice").Exists() {
+		t.Fatalf("expected hosted image_generation tool choice to be removed, got %s", string(result))
+	}
+}
+
+func TestEnsureImageGenerationTool_NestedImageGenNamespaceRemovesHostedToolAndChoice(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","tool_choice":{"type":"image_generation"},"tools":[{"type":"image_generation","output_format":"png"}],"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{}}]}]}]}`)
+	result := ensureImageGenerationTool(body, "gpt-5.6-sol", nil, nil)
+
+	if gjson.GetBytes(result, "tools.0.type").String() == "image_generation" {
+		t.Fatalf("expected hosted image_generation to be removed, got %s", string(result))
+	}
+	if got := gjson.GetBytes(result, "input.0.tools.0.name").String(); got != "image_gen" {
+		t.Fatalf("nested image_gen namespace = %q, want image_gen: %s", got, result)
+	}
+	if gjson.GetBytes(result, "tool_choice").Exists() {
+		t.Fatalf("expected hosted image_generation tool choice to be removed, got %s", string(result))
+	}
+}
+
+func TestEnsureImageGenerationTool_FunctionNameShapeRemovesHostedTool(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","tools":[{"type":"function","function":{"name":"image_gen.imagegen"}},{"type":"image_generation"}]}`)
+	result := ensureImageGenerationTool(body, "gpt-5.6-sol", nil, nil)
+
+	tools := gjson.GetBytes(result, "tools").Array()
+	if len(tools) != 1 || tools[0].Get("function.name").String() != "image_gen.imagegen" {
+		t.Fatalf("expected only official image_gen function to remain, got %s", string(result))
 	}
 }
 

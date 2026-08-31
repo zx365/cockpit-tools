@@ -7,6 +7,38 @@ All notable changes to Cockpit Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
+## [1.3.34] - 2026-08-28
+
+### Added
+
+- **Manual Codex OAuth Token refresh**: refresh an account's credentials from the account overview and review the result, failure reason, retry, or reauthorization action in a dedicated dialog.
+- **Account-pool diagnostics**: when no account can handle a request, the account-pool dialog explains the selection result and provides recovery actions.
+- **Per-account image-generation policy**: API Service account pools can enable or disable image generation for individual accounts without affecting text requests.
+
+### Changed
+
+- **Unified Codex authentication flow**: account overview, default and managed instances, API Service, and API Key OAuth bindings now use the same credential preparation, refresh, reauthorization, progress, and result handling.
+- **Client authorization state is informational**: an observed client login-page redirect no longer blocks switching or API Service use; an explicit upstream authorization revocation remains the highest-priority state.
+- **OAuth authorization follows the official desktop entry point** and remains usable without a local Codex client; browser authorization now allows up to 10 minutes, and the client-version default can be managed remotely, cached locally, or overridden in Settings.
+- **Profile isolation and quota refresh efficiency**: API Service and managed instances keep independent provider gateways, while batch quota refresh reduces repeated process probing and request contention.
+- **Launch actions are recoverable**: users can cancel, retry, reauthorize, or skip eligible non-blocking failures from the active launch dialog.
+- **Subscription information is labeled as “Subscription validity”** so it is distinct from Token expiration.
+
+### Fixed
+
+- **Fixed stale OAuth credentials being restored after reauthorization, switching, quota refresh, or profile synchronization**, preventing accounts from reverting to an older Token.
+- **Fixed client login-page observations leaving stale or delayed account-card state**: the account overview now updates the recorded client status promptly and keeps it separate from API authorization failures.
+- **Fixed account-pool errors being hidden after dispatch failures**: unavailable-account results now retain pool diagnostics and display localized recovery information in the account-pool dialog.
+- **Fixed API 401 results being shown as API Service available**: the account status now reflects an actual upstream rejection.
+- **Fixed account cards remaining in a loading state after cancelling a switch**.
+- **Fixed text requests being rejected solely because image generation is unavailable**, and corrected affected controls that displayed browser-native gray button styles.
+
+## [1.3.33] - 2026-08-27
+
+### Changed
+
+- **The account overview and managed instances now share the same Codex client launch experience**: “Switch and launch” from the account overview, the default instance, and managed instances now use the same launch progress and authentication-result presentation, including consistent `access_token` and `id_token` expiration, refresh, and reauthorization states. Authorization or launch failures can be retried from the same dialog, and the original launch resumes after reauthorization succeeds.
+
 ## [1.3.32] - 2026-08-26
 
 ### Changed

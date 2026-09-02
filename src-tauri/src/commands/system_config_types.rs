@@ -234,6 +234,8 @@ pub struct GeneralConfig {
     pub ghcp_launch_on_switch: bool,
     /// 切换 Codex 时是否覆盖 OpenClaw 登录信息
     pub openclaw_auth_overwrite_on_switch: bool,
+    /// Codex 额度进入新周期时是否通过 OpenClaw 微信通知
+    pub openclaw_wechat_quota_notification_enabled: bool,
     pub hermes_auth_overwrite_on_switch: bool,
     /// 切换 Codex 时是否自动启动/重启 Codex App
     pub codex_launch_on_switch: bool,
@@ -1213,6 +1215,7 @@ fn is_general_config_patch_field(key: &str) -> bool {
             | "ghcp_opencode_auth_overwrite_on_switch"
             | "ghcp_launch_on_switch"
             | "openclaw_auth_overwrite_on_switch"
+            | "openclaw_wechat_quota_notification_enabled"
             | "hermes_auth_overwrite_on_switch"
             | "codex_launch_on_switch"
             | "antigravity_launch_on_switch"

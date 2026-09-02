@@ -847,7 +847,10 @@ fn extract_workspace_title(account: &crate::models::codex::CodexAccount) -> Opti
     matched_title.or(default_title).or(first_title)
 }
 
-fn resolve_account_context_text(account: &crate::models::codex::CodexAccount) -> Option<String> {
+/// 解析与账号页面一致的 Team Name；个人账号显示为“个人账户”。
+pub(crate) fn resolve_account_context_text(
+    account: &crate::models::codex::CodexAccount,
+) -> Option<String> {
     let structure = normalize_text(account.account_structure.as_deref())
         .map(|value| value.to_ascii_lowercase());
     let is_personal = structure

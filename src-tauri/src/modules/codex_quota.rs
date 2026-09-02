@@ -1,5 +1,5 @@
 use crate::models::codex::{CodexAccount, CodexQuota, CodexQuotaErrorInfo, CodexResetCredit};
-use crate::modules::{codex_account, codex_agent_identity, logger};
+use crate::modules::{codex_account, codex_agent_identity, config, logger, openclaw_auth};
 use reqwest::header::{
     HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, REFERER, USER_AGENT,
 };
@@ -233,6 +233,87 @@ struct AccountCheckRecord {
 
 fn now_timestamp() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+/// 判断单个额度窗口是否已进入新的重置周期。
+fn quota_window_entered_new_cycle(
+    old_percentage: i32,
+    old_reset_time: Option<i64>,
+    new_percentage: i32,
+    new_reset_time: Option<i64>,
+    now: i64,
+) -> bool {
+    matches!((old_reset_time, new_reset_time), (Some(old), Some(new)) if old <= now && new > old)
+        && new_percentage > old_percentage
+}
+
+/// 构建额度恢复通知；没有真实跨周期时不通知。
+fn build_quota_restored_message(
+    account: &CodexAccount,
+    previous: Option<&CodexQuota>,
+    current: &CodexQuota,
+    now: i64,
+) -> Option<String> {
+    let previous = previous?;
+    let hourly_restored = previous.hourly_window_present != Some(false)
+        && current.hourly_window_present != Some(false)
+        && quota_window_entered_new_cycle(
+            previous.hourly_percentage,
+            previous.hourly_reset_time,
+            current.hourly_percentage,
+            current.hourly_reset_time,
+            now,
+        );
+    let weekly_restored = previous.weekly_window_present != Some(false)
+        && current.weekly_window_present != Some(false)
+        && quota_window_entered_new_cycle(
+            previous.weekly_percentage,
+            previous.weekly_reset_time,
+            current.weekly_percentage,
+            current.weekly_reset_time,
+            now,
+        );
+    if !hourly_restored && !weekly_restored {
+        return None;
+    }
+
+    let account_label = if account.email.trim().is_empty() {
+        account.account_name.as_deref().unwrap_or(&account.id)
+    } else {
+        account.email.trim()
+    };
+    let mut lines = vec![
+        "Cockpit Tools：Codex 额度已恢复".to_string(),
+        format!("账号：{account_label}"),
+    ];
+    if let Some(team_name) = crate::modules::codex_wakeup::resolve_account_context_text(account) {
+        lines.push(format!("Team Name：{team_name}"));
+    }
+    if hourly_restored {
+        lines.push(format!("5 小时额度：{}%", current.hourly_percentage));
+    }
+    if weekly_restored {
+        lines.push(format!("周额度：{}%", current.weekly_percentage));
+    }
+    Some(lines.join("\n"))
+}
+
+/// 保存最新额度，并在启用时异步发送跨周期通知。
+fn persist_refreshed_quota(account: &mut CodexAccount, quota: &CodexQuota) -> Result<(), String> {
+    let notification = config::get_user_config()
+        .openclaw_wechat_quota_notification_enabled
+        .then(|| {
+            build_quota_restored_message(account, account.quota.as_ref(), quota, now_timestamp())
+        })
+        .flatten();
+    account.quota = Some(quota.clone());
+    account.quota_error = None;
+    account.usage_updated_at = Some(now_timestamp());
+    codex_account::save_account(account)?;
+    if let Some(message) = notification {
+        openclaw_auth::notify_openclaw_wechat(message);
+    }
+    Ok(())
 }
 
 fn parse_reset_credit_timestamp_value(value: Option<&serde_json::Value>) -> Option<i64> {
@@ -1615,10 +1696,7 @@ async fn refresh_account_quota_once(
                 sync_subscription_from_token(&mut account, result.plan_type.clone(), None);
             }
             normalize_subscription_retry_state(&mut account);
-            account.quota = Some(result.quota.clone());
-            account.quota_error = None;
-            account.usage_updated_at = Some(now_timestamp());
-            codex_account::save_account(&account)?;
+            persist_refreshed_quota(&mut account, &result.quota)?;
             return Ok(result.quota);
         }
         account.quota = None;
@@ -1642,10 +1720,7 @@ async fn refresh_account_quota_once(
         if result.plan_type.is_some() {
             sync_subscription_from_token(&mut account, result.plan_type.clone(), None);
         }
-        account.quota = Some(result.quota.clone());
-        account.quota_error = None;
-        account.usage_updated_at = Some(now_timestamp());
-        codex_account::save_account(&account)?;
+        persist_refreshed_quota(&mut account, &result.quota)?;
         return Ok(result.quota);
     }
 
@@ -1708,10 +1783,7 @@ async fn refresh_account_quota_once(
         ));
     }
 
-    account.quota = Some(result.quota.clone());
-    account.quota_error = None;
-    account.usage_updated_at = Some(now_timestamp());
-    codex_account::save_account(&account)?;
+    persist_refreshed_quota(&mut account, &result.quota)?;
 
     Ok(result.quota)
 }
@@ -1801,10 +1873,7 @@ pub async fn refresh_freshly_authorized_account_quota(
         sync_subscription_from_token(&mut latest, result.plan_type.clone(), None);
     }
     normalize_subscription_retry_state(&mut latest);
-    latest.quota = Some(result.quota.clone());
-    latest.quota_error = None;
-    latest.usage_updated_at = Some(now_timestamp());
-    codex_account::save_account(&latest)?;
+    persist_refreshed_quota(&mut latest, &result.quota)?;
 
     crate::modules::codex_local_access::reevaluate_bound_oauth_quota_reserve_after_refresh(
         account_id, true,
@@ -2071,7 +2140,7 @@ mod tests {
     use super::{
         attach_runtime_snapshot_to_account_ids, build_codex_api_headers,
         normalize_http_error_body_for_display, normalize_remaining_percentage,
-        parse_account_check_snapshot, parse_reset_credits_snapshot,
+        parse_account_check_snapshot, parse_reset_credits_snapshot, quota_window_entered_new_cycle,
         send_codex_api_request_with_agent_auth_base_url, WindowInfo,
         HTTP_ERROR_BODY_DISPLAY_MAX_CHARS,
     };
@@ -2098,6 +2167,32 @@ mod tests {
         assert!(jobs
             .iter()
             .all(|(_, snapshot)| Arc::ptr_eq(snapshot, &runtime_snapshot)));
+    }
+
+    /// 仅在已到旧重置点、重置时间推进且剩余额度上升时识别新周期。
+    #[test]
+    fn detects_real_quota_reset_cycle() {
+        assert!(quota_window_entered_new_cycle(
+            5,
+            Some(1_000),
+            100,
+            Some(2_000),
+            1_001,
+        ));
+        assert!(!quota_window_entered_new_cycle(
+            5,
+            Some(1_500),
+            100,
+            Some(2_000),
+            1_001,
+        ));
+        assert!(!quota_window_entered_new_cycle(
+            80,
+            Some(1_000),
+            70,
+            Some(2_000),
+            1_001,
+        ));
     }
 
     fn agent_identity_test_account() -> CodexAccount {

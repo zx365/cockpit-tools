@@ -391,6 +391,9 @@ pub struct UserConfig {
     /// 切换 Codex 时是否覆盖 OpenClaw 登录信息
     #[serde(default = "default_openclaw_auth_overwrite_on_switch")]
     pub openclaw_auth_overwrite_on_switch: bool,
+    /// Codex 额度进入新周期时是否通过 OpenClaw 微信通知
+    #[serde(default = "default_openclaw_wechat_quota_notification_enabled")]
+    pub openclaw_wechat_quota_notification_enabled: bool,
     /// 切换 Codex 时是否同步 Hermes auth.json（默认关）
     #[serde(default = "default_hermes_auth_overwrite_on_switch")]
     pub hermes_auth_overwrite_on_switch: bool,
@@ -1007,6 +1010,10 @@ fn default_ghcp_launch_on_switch() -> bool {
 fn default_openclaw_auth_overwrite_on_switch() -> bool {
     false
 }
+/// 默认关闭 OpenClaw 微信额度通知。
+fn default_openclaw_wechat_quota_notification_enabled() -> bool {
+    false
+}
 fn default_hermes_auth_overwrite_on_switch() -> bool {
     false
 }
@@ -1295,6 +1302,8 @@ impl Default for UserConfig {
             ),
             ghcp_launch_on_switch: default_ghcp_launch_on_switch(),
             openclaw_auth_overwrite_on_switch: default_openclaw_auth_overwrite_on_switch(),
+            openclaw_wechat_quota_notification_enabled:
+                default_openclaw_wechat_quota_notification_enabled(),
             hermes_auth_overwrite_on_switch: default_hermes_auth_overwrite_on_switch(),
             codex_launch_on_switch: default_codex_launch_on_switch(),
             codex_auto_restore_takeover_on_launch:
@@ -2576,6 +2585,7 @@ mod tests {
         let cfg: UserConfig =
             serde_json::from_value(serde_json::json!({})).expect("反序列化默认配置应成功");
         assert!(!cfg.openclaw_auth_overwrite_on_switch);
+        assert!(!cfg.openclaw_wechat_quota_notification_enabled);
     }
 
     #[test]

@@ -148,6 +148,7 @@ interface GeneralConfig {
   ghcp_opencode_auth_overwrite_on_switch: boolean;
   ghcp_launch_on_switch: boolean;
   openclaw_auth_overwrite_on_switch: boolean;
+  openclaw_wechat_quota_notification_enabled: boolean;
   hermes_auth_overwrite_on_switch?: boolean;
   codex_launch_on_switch: boolean;
   antigravity_launch_on_switch: boolean;
@@ -206,6 +207,27 @@ interface GeneralConfig {
   zed_quota_alert_enabled: boolean;
   zed_quota_alert_threshold: number;
 }
+
+interface OpenClawModelSettings {
+  model: string;
+  thinking: string;
+}
+
+const OPENCLAW_MODEL_OPTIONS = [
+  ['openai/gpt-5.6-luna', 'Luna（快速，推荐）'],
+  ['openai/gpt-5.6-terra', 'Terra（均衡）'],
+  ['openai/gpt-5.6-sol', 'Sol（强力）'],
+  ['openai/gpt-5.5', 'GPT-5.5'],
+] as const;
+
+const OPENCLAW_THINKING_OPTIONS = [
+  ['off', '关闭'],
+  ['minimal', '最小'],
+  ['low', '低（推荐）'],
+  ['medium', '中'],
+  ['high', '高'],
+  ['xhigh', '极高'],
+] as const;
 
 export type QuickSettingsType =
   | 'antigravity'
@@ -413,6 +435,11 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
   const [pathDetecting, setPathDetecting] = useState(false);
   const [appLaunchCandidates, setAppLaunchCandidates] = useState<AppLaunchCandidate[]>([]);
   const [openingCodexConfig, setOpeningCodexConfig] = useState(false);
+  const [bindingOpenClawWechat, setBindingOpenClawWechat] = useState(false);
+  const [testingOpenClawWechat, setTestingOpenClawWechat] = useState(false);
+  const [openClawModel, setOpenClawModel] = useState('openai/gpt-5.6-luna');
+  const [openClawThinking, setOpenClawThinking] = useState('low');
+  const [savingOpenClawModel, setSavingOpenClawModel] = useState(false);
   const [codexQuickConfig, setCodexQuickConfig] = useState<CodexQuickConfig | null>(null);
   const [
     codexExperimentalModelCatalogEnabled,
@@ -779,12 +806,20 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
               getCodexAccountGroups(),
             ]).catch(() => [[] as CodexAccount[], [] as CodexAccountGroup[]] as const)
           : Promise.resolve([[] as CodexAccount[], [] as CodexAccountGroup[]] as const);
+      const openClawModelSettingsPromise =
+        type === 'codex'
+          ? invoke<OpenClawModelSettings>('get_openclaw_model_settings').catch(() => ({
+              model: 'openai/gpt-5.6-luna',
+              thinking: 'low',
+            }))
+          : Promise.resolve({ model: 'openai/gpt-5.6-luna', thinking: 'low' });
 
-      const [cfg, groups, antigravityScopeData, codexScopeData] = await Promise.all([
+      const [cfg, groups, antigravityScopeData, codexScopeData, openClawModelSettings] = await Promise.all([
         invoke<GeneralConfig>('get_general_config'),
         getDisplayGroups().catch(() => [] as DisplayGroup[]),
         antigravityScopeDataPromise,
         codexScopeDataPromise,
+        openClawModelSettingsPromise,
       ]);
       const [nextAntigravityAccounts, nextAntigravityGroups] = antigravityScopeData;
       const [nextCodexAccounts, nextCodexGroups] = codexScopeData;
@@ -804,6 +839,8 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
       setAntigravityAccountGroups(nextAntigravityGroups || []);
       setCodexAccounts(nextCodexAccounts || []);
       setCodexAccountGroups(nextCodexGroups || []);
+      setOpenClawModel(openClawModelSettings.model);
+      setOpenClawThinking(openClawModelSettings.thinking);
       // 非预设值通过下拉中的动态选项展示，不默认进入输入态
       setRefreshEditing(false);
       setCurrentAccountRefreshEditing(false);
@@ -989,6 +1026,60 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
       setOpeningCodexConfig(false);
     }
   }, [openingCodexConfig, t]);
+
+  /** 保存 OpenClaw 默认模型与思考强度。 */
+  const handleSaveOpenClawModel = useCallback(async () => {
+    if (savingOpenClawModel) return;
+    setSavingOpenClawModel(true);
+    setError(null);
+    try {
+      await invoke('save_openclaw_model_settings', {
+        model: openClawModel,
+        thinking: openClawThinking,
+      });
+    } catch (err) {
+      setError(`保存 OpenClaw 模型设置失败：${String(err)}`);
+    } finally {
+      setSavingOpenClawModel(false);
+    }
+  }, [openClawModel, openClawThinking, savingOpenClawModel]);
+
+  /** 在可见终端中启动 OpenClaw 微信安装与扫码绑定。 */
+  const handleBindOpenClawWechat = useCallback(async () => {
+    if (bindingOpenClawWechat) return;
+    setBindingOpenClawWechat(true);
+    setError(null);
+    try {
+      await invoke('openclaw_wechat_bind', {
+        model: openClawModel,
+        thinking: openClawThinking,
+      });
+    } catch (err) {
+      setError(t('quickSettings.openclawWechat.bindFailed', {
+        error: String(err),
+        defaultValue: '打开 OpenClaw 微信绑定失败：{{error}}',
+      }));
+    } finally {
+      setBindingOpenClawWechat(false);
+    }
+  }, [bindingOpenClawWechat, openClawModel, openClawThinking, t]);
+
+  /** 向最近绑定且已建立会话的微信发送测试通知。 */
+  const handleTestOpenClawWechat = useCallback(async () => {
+    if (testingOpenClawWechat) return;
+    setTestingOpenClawWechat(true);
+    setError(null);
+    try {
+      await invoke('test_openclaw_wechat_notification');
+    } catch (err) {
+      setError(t('quickSettings.openclawWechat.testFailed', {
+        error: String(err),
+        defaultValue: 'OpenClaw 微信测试通知失败：{{error}}',
+      }));
+    } finally {
+      setTestingOpenClawWechat(false);
+    }
+  }, [testingOpenClawWechat, t]);
 
   const getTitle = () => {
     const platformLabel = (() => {
@@ -2779,6 +2870,118 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
                       />
                       <span className="qs-switch-slider"></span>
                     </label>
+                  </div>
+                </div>
+
+                <div className="qs-row">
+                  <div className="qs-row-label">
+                    <label htmlFor="openclaw-default-model">OpenClaw 默认模型</label>
+                  </div>
+                  <div className="qs-row-control">
+                    <select
+                      id="openclaw-default-model"
+                      className="qs-select"
+                      value={openClawModel}
+                      onChange={(event) => setOpenClawModel(event.target.value)}
+                    >
+                      {!OPENCLAW_MODEL_OPTIONS.some(([value]) => value === openClawModel) && (
+                        <option value={openClawModel}>{openClawModel}</option>
+                      )}
+                      {OPENCLAW_MODEL_OPTIONS.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="qs-row">
+                  <div className="qs-row-label">
+                    <label htmlFor="openclaw-thinking">思考强度</label>
+                  </div>
+                  <div className="qs-row-control">
+                    <select
+                      id="openclaw-thinking"
+                      className="qs-select"
+                      value={openClawThinking}
+                      onChange={(event) => setOpenClawThinking(event.target.value)}
+                    >
+                      {OPENCLAW_THINKING_OPTIONS.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="qs-hint">
+                  应用时自动复用 Cockpit 当前 Codex 登录；Luna + 低思考适合微信通知等简单任务。
+                </div>
+                <div className="qs-row">
+                  <div className="qs-row-label" />
+                  <div className="qs-row-control">
+                    <button
+                      type="button"
+                      className="qs-btn"
+                      onClick={() => void handleSaveOpenClawModel()}
+                      disabled={savingOpenClawModel}
+                    >
+                      {savingOpenClawModel ? '保存中...' : '应用模型'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="qs-row qs-row--top">
+                  <div className="qs-row-label">
+                    <Zap size={15} />
+                    <span>
+                      {t(
+                        'quickSettings.openclawWechat.enable',
+                        '额度恢复时微信通知',
+                      )}
+                    </span>
+                  </div>
+                  <div className="qs-row-control">
+                    <label className="qs-switch">
+                      <input
+                        type="checkbox"
+                        checked={config.openclaw_wechat_quota_notification_enabled}
+                        onChange={(event) =>
+                          saveConfig({
+                            openclaw_wechat_quota_notification_enabled: event.target.checked,
+                          })
+                        }
+                      />
+                      <span className="qs-switch-slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div className="qs-hint">
+                  {t(
+                    'quickSettings.openclawWechat.hint',
+                    '检测到 5 小时或周额度进入新周期后通知。绑定后请先向机器人发送任意消息，以建立主动推送会话。',
+                  )}
+                </div>
+                <div className="qs-row">
+                  <div className="qs-row-label" />
+                  <div className="qs-row-control" style={{ gap: 8 }}>
+                    <button
+                      type="button"
+                      className="qs-btn"
+                      onClick={() => void handleBindOpenClawWechat()}
+                      disabled={bindingOpenClawWechat}
+                    >
+                      {bindingOpenClawWechat
+                        ? t('common.loading', '加载中...')
+                        : t('quickSettings.openclawWechat.bind', '绑定微信')}
+                    </button>
+                    <button
+                      type="button"
+                      className="qs-btn"
+                      onClick={() => void handleTestOpenClawWechat()}
+                      disabled={testingOpenClawWechat}
+                    >
+                      {testingOpenClawWechat
+                        ? t('common.loading', '加载中...')
+                        : t('quickSettings.openclawWechat.test', '测试通知')}
+                    </button>
                   </div>
                 </div>
 

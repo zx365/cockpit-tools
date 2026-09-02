@@ -1764,6 +1764,60 @@ pub async fn refresh_codex_quota(app: AppHandle, account_id: String) -> Result<C
     result
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenClawModelSettings {
+    pub model: String,
+    pub thinking: String,
+}
+
+/// 读取 OpenClaw 默认模型与思考强度。
+#[tauri::command]
+pub fn get_openclaw_model_settings() -> Result<OpenClawModelSettings, String> {
+    let (model, thinking) = openclaw_auth::get_openclaw_model_settings()?;
+    Ok(OpenClawModelSettings { model, thinking })
+}
+
+/// 保存 OpenClaw 默认模型与思考强度。
+#[tauri::command]
+pub async fn save_openclaw_model_settings(model: String, thinking: String) -> Result<(), String> {
+    let account = codex_account::get_current_account()
+        .ok_or_else(|| "未找到 Cockpit 当前 Codex 账号，请先登录或切换账号".to_string())?;
+    tokio::task::spawn_blocking(move || {
+        openclaw_auth::save_openclaw_model_settings(&model, &thinking)?;
+        openclaw_auth::replace_openai_codex_entry_from_codex(&account)
+    })
+    .await
+    .map_err(|error| format!("保存 OpenClaw 模型设置任务失败: {error}"))?
+}
+
+/// 在可见终端中初始化 Gateway、安装微信插件并启动扫码绑定。
+#[tauri::command]
+pub fn openclaw_wechat_bind(model: String, thinking: String) -> Result<String, String> {
+    openclaw_auth::validate_openclaw_model_settings(&model, &thinking)?;
+    let account = codex_account::get_current_account()
+        .ok_or_else(|| "未找到 Cockpit 当前 Codex 账号，请先登录或切换账号".to_string())?;
+    openclaw_auth::replace_openai_codex_entry_from_codex(&account)?;
+    openclaw_auth::sync_openclaw_gateway_proxy_env()?;
+    let command = format!(
+        "openclaw gateway install; npx -y @tencent-weixin/openclaw-weixin-cli install; openclaw config set agents.defaults.model.primary {model}; openclaw config set agents.defaults.thinkingDefault {thinking}; openclaw gateway restart"
+    );
+    crate::commands::claude::execute_claude_cli_command(
+        &command,
+        Some(config::get_user_config().default_terminal),
+    )
+}
+
+/// 向最近绑定且已建立会话的微信发送测试通知。
+#[tauri::command]
+pub async fn test_openclaw_wechat_notification() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        openclaw_auth::send_openclaw_wechat_message("Cockpit Tools：微信通知已连接。")
+    })
+    .await
+    .map_err(|error| format!("微信测试通知任务失败: {error}"))?
+}
+
 #[tauri::command]
 pub async fn get_codex_reset_credits(
     account_id: String,

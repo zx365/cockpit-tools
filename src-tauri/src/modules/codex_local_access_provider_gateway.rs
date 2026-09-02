@@ -448,7 +448,11 @@ fn provider_gateway_models_for_account(account: &CodexAccount) -> Vec<String> {
         .trim()
         .to_ascii_lowercase();
     if provider_id == "deepseek" || base_url.contains("api.deepseek.com") {
-        return normalize_provider_gateway_models(vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
+        return normalize_provider_gateway_models(vec![
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash-vision-exp",
+        ]);
     }
     if provider_id == "moonshot" || base_url.contains("api.moonshot.cn") {
         return normalize_provider_gateway_models(vec!["kimi-k2.6"]);
@@ -509,6 +513,7 @@ fn is_provider_model_shell_slug(model: &str) -> bool {
 const DEEPSEEK_OFFICIAL_SHELL_SLOTS: &[(&str, &str)] = &[
     ("deepseek-v4-flash", "gpt-5.5"),
     ("deepseek-v4-pro", "gpt-5.4"),
+    ("deepseek-v4-flash-vision-exp", "gpt-5.4-mini"),
 ];
 
 fn allocate_official_deepseek_shell_slots(
@@ -544,7 +549,7 @@ fn allocate_official_deepseek_shell_slots(
 
 /// Allocate client-visible model shells for upstream provider models.
 ///
-/// 1. Official DeepSeek Responses models use a fixed 5.5 / 5.4 whitelist.
+/// 1. Official DeepSeek Responses models use a fixed shell whitelist.
 /// 2. Upstream IDs that already match an official shell keep identity.
 /// 3. Remaining models claim free shells in pool order.
 /// 4. If the shell pool is exhausted, keep the upstream ID so nothing is dropped.
@@ -1092,30 +1097,46 @@ fn provider_gateway_for_account(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(DEFAULT_OPENAI_RESPONSES_BASE_URL);
+    let upstream_models = provider_gateway_models_for_account(account);
+    let mut model_capabilities = account
+        .api_model_vision_support
+        .iter()
+        .filter_map(|(model, supports_vision)| {
+            let model = model.trim().to_lowercase();
+            if model.is_empty() {
+                None
+            } else {
+                Some((
+                    model,
+                    CodexLocalAccessProviderGatewayModelCapability {
+                        supports_vision: *supports_vision,
+                    },
+                ))
+            }
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    // Provider catalogs expose shell aliases to Codex while requests are
+    // rewritten to the upstream model. Keep the capability on both names so
+    // the /models response and request guard agree for mapped DeepSeek models.
+    for slot in allocate_provider_model_slots(&upstream_models) {
+        if let Some(capability) = model_capabilities
+            .get(&slot.upstream_model.to_lowercase())
+            .cloned()
+        {
+            model_capabilities
+                .entry(slot.client_model.to_lowercase())
+                .or_insert(capability);
+        }
+    }
+
     Ok(CodexLocalAccessProviderGateway {
         base_url: base_url.to_string(),
         api_key: api_key.to_string(),
-        upstream_model: provider_gateway_default_model_for_account(account),
-        upstream_models: provider_gateway_models_for_account(account),
+        upstream_model: upstream_models.first().cloned().unwrap_or_default(),
+        upstream_models,
         wire_api: Some(provider_gateway_wire_api_for_account(account)),
         supports_vision: account.api_supports_vision,
-        model_capabilities: account
-            .api_model_vision_support
-            .iter()
-            .filter_map(|(model, supports_vision)| {
-                let model = model.trim().to_lowercase();
-                if model.is_empty() {
-                    None
-                } else {
-                    Some((
-                        model,
-                        CodexLocalAccessProviderGatewayModelCapability {
-                            supports_vision: *supports_vision,
-                        },
-                    ))
-                }
-            })
-            .collect(),
+        model_capabilities,
         vision_routing_model: account
             .api_vision_routing_model
             .as_deref()
@@ -2171,17 +2192,42 @@ fn backup_current_profile_model_before_provider_gateway(
         .and_then(|item| item.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let previous_model = current_model.filter(|model| {
-        !provider_models
-            .iter()
-            .any(|item| item.trim().eq_ignore_ascii_case(model))
-    });
-    save_provider_model_backup(profile_dir, previous_model, provider_models)
+    save_provider_model_backup(profile_dir, current_model, provider_models)
 }
 
 pub fn cleanup_provider_gateway_profile_model_overrides(profile_dir: &Path) -> Result<(), String> {
+    let override_state = read_provider_model_backup(profile_dir);
+    let has_legacy_provider_catalog = [
+        CODEX_LEGACY_PROVIDER_MODEL_CATALOG_FILE,
+        CODEX_LEGACY_LOCAL_ACCESS_MODEL_CATALOG_FILE,
+    ]
+    .iter()
+    .any(|file_name| profile_dir.join(file_name).is_file());
+    let has_legacy_provider_catalog_reference =
+        std::fs::read_to_string(profile_config_path(profile_dir))
+            .ok()
+            .and_then(|content| {
+                crate::modules::codex_config_format::read_codex_config_doc_from_str(&content).ok()
+            })
+            .and_then(|doc| {
+                doc.get("model_catalog_json")
+                    .and_then(|item| item.as_str())
+                    .map(str::trim)
+                    .map(str::to_string)
+            })
+            .is_some_and(|catalog| {
+                catalog.eq_ignore_ascii_case(CODEX_LEGACY_PROVIDER_MODEL_CATALOG_FILE)
+                    || catalog.eq_ignore_ascii_case(CODEX_LEGACY_LOCAL_ACCESS_MODEL_CATALOG_FILE)
+            });
+    if override_state.is_none()
+        && !has_legacy_provider_catalog
+        && !has_legacy_provider_catalog_reference
+    {
+        return Ok(());
+    }
+
     let catalog_path = profile_dir.join(CODEX_PROVIDER_MODEL_CATALOG_FILE);
-    let override_state = read_provider_model_backup(profile_dir).unwrap_or_default();
+    let override_state = override_state.unwrap_or_default();
     let previous_model = override_state.previous_model;
     let mut managed_models = override_state.managed_models;
     for file_name in [
@@ -2252,6 +2298,7 @@ pub fn cleanup_provider_gateway_profile_model_overrides(profile_dir: &Path) -> R
             .map_err(|e| format!("删除 Codex provider 模型目录失败: {}", e))?;
     }
     codex_account::cleanup_legacy_managed_model_catalogs(profile_dir);
+    codex_account::reapply_experimental_model_policy_if_enabled(profile_dir)?;
     delete_provider_model_backup(profile_dir)?;
     Ok(())
 }

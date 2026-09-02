@@ -226,6 +226,7 @@ interface GeneralConfig {
   openclaw_auth_overwrite_on_switch: boolean;
   hermes_auth_overwrite_on_switch?: boolean;
   codex_launch_on_switch: boolean;
+  codex_auto_restore_takeover_on_launch?: boolean;
   antigravity_launch_on_switch: boolean;
   codex_restart_specified_app_on_switch: boolean;
   codex_local_access_entry_visible: boolean;
@@ -659,6 +660,7 @@ export function useSettingsPageController() {
   const [openclawAuthOverwriteOnSwitch, setOpenclawAuthOverwriteOnSwitch] = useState(false);
   const [hermesAuthOverwriteOnSwitch, setHermesAuthOverwriteOnSwitch] = useState(false);
   const [codexLaunchOnSwitch, setCodexLaunchOnSwitch] = useState(true);
+  const [codexAutoRestoreTakeoverOnLaunch, setCodexAutoRestoreTakeoverOnLaunch] = useState(true);
   const [antigravityLaunchOnSwitch, setAntigravityLaunchOnSwitch] = useState(true);
   const [codexRestartSpecifiedAppOnSwitch, setCodexRestartSpecifiedAppOnSwitch] = useState(false);
   const [codexLocalAccessEntryVisible, setCodexLocalAccessEntryVisible] = useState(true);
@@ -1144,6 +1146,7 @@ export function useSettingsPageController() {
       openclaw_auth_overwrite_on_switch: openclawAuthOverwriteOnSwitch,
       hermes_auth_overwrite_on_switch: hermesAuthOverwriteOnSwitch,
       codex_launch_on_switch: codexLaunchOnSwitch,
+      codex_auto_restore_takeover_on_launch: codexAutoRestoreTakeoverOnLaunch,
       antigravity_launch_on_switch: antigravityLaunchOnSwitch,
       codex_restart_specified_app_on_switch: codexRestartSpecifiedAppOnSwitch,
       codex_local_access_entry_visible: codexLocalAccessEntryVisible,
@@ -1759,6 +1762,7 @@ export function useSettingsPageController() {
       setOpenclawAuthOverwriteOnSwitch(config.openclaw_auth_overwrite_on_switch ?? false);
       setHermesAuthOverwriteOnSwitch(config.hermes_auth_overwrite_on_switch ?? false);
       setCodexLaunchOnSwitch(config.codex_launch_on_switch ?? true);
+      setCodexAutoRestoreTakeoverOnLaunch(config.codex_auto_restore_takeover_on_launch ?? true);
       setAntigravityLaunchOnSwitch(config.antigravity_launch_on_switch ?? true);
       setCodexRestartSpecifiedAppOnSwitch(
         config.codex_restart_specified_app_on_switch ?? false,
@@ -3274,6 +3278,8 @@ export function useSettingsPageController() {
     codexHideRelayQuota,
     codexLaunchCandidates,
     codexLaunchOnSwitch,
+    codexAutoRestoreTakeoverOnLaunch,
+    setCodexAutoRestoreTakeoverOnLaunch,
     codexLocalAccessEntryVisible,
     codexQuotaAlertEnabled,
     codexQuotaAlertThreshold,

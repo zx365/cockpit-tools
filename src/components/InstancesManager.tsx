@@ -76,7 +76,7 @@ import {
   getCodexInstanceQuickConfig,
   openCodexInstanceConfigToml,
   saveCodexInstanceConfiguration,
-  saveCodexInstanceQuickConfig,
+  saveCodexInstanceModelCatalog,
 } from "../services/codexInstanceService";
 import { CodexSpeedSelect } from "./codex/CodexSpeedSelect";
 import { SingleSelectDropdown } from "./SingleSelectDropdown";
@@ -1636,10 +1636,8 @@ export function InstancesManager<TAccount extends AccountLike>({
           nextModelRouting &&
           nextExperimentalModelCatalogEnabled
         ) {
-          await saveCodexInstanceQuickConfig(
+          await saveCodexInstanceModelCatalog(
             created.id,
-            undefined,
-            undefined,
             true,
             nextExperimentalModels,
             formExperimentalDefaultModelId,

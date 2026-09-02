@@ -119,6 +119,13 @@ jobs:
         with:
           key: ${{ matrix.platform }}-${{ matrix.label }}
 
+      - name: 🧪 Test Codex context preservation
+        if: matrix.label == 'ubuntu-22.04'
+        working-directory: src-tauri
+        run: |
+          cargo test instance_configuration_save --lib
+          cargo test quick_config_catalog_only_context_preservation --lib
+
       - name: 🐹 Go setup
         uses: actions/setup-go@v5
         with:

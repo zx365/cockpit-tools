@@ -118,6 +118,7 @@ interface CodexAccountState {
   // Actions
   fetchAccounts: (options?: FetchCodexAccountsOptions) => Promise<void>;
   fetchCurrentAccount: (options?: FetchCodexCurrentAccountOptions) => Promise<void>;
+  restoreActiveTakeoverIfNeeded: () => Promise<void>;
   applyAccountSnapshot: (account: CodexAccount) => void;
   switchAccount: (accountId: string, options?: SwitchCodexAccountOptions) => Promise<CodexAccount>;
   deleteAccount: (accountId: string) => Promise<void>;
@@ -205,6 +206,14 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
         return;
       }
       console.error('获取当前 Codex 账号失败:', e);
+    }
+  },
+
+  restoreActiveTakeoverIfNeeded: async () => {
+    try {
+      await codexService.restoreCodexActiveTakeoverIfEnabled();
+    } catch (e) {
+      console.warn('[Codex Store] 自动恢复接管失败:', e);
     }
   },
 

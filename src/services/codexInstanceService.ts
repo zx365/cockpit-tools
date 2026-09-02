@@ -178,6 +178,21 @@ export async function saveCodexInstanceQuickConfig(
   });
 }
 
+export async function saveCodexInstanceModelCatalog(
+  instanceId: string,
+  experimentalModelCatalogEnabled: boolean,
+  experimentalModelCatalogModels: CodexExperimentalModelDefinition[],
+  experimentalModelCatalogDefaultModelId?: string | null,
+): Promise<CodexQuickConfig> {
+  return await invoke("codex_save_instance_model_catalog", {
+    instanceId,
+    experimentalModelCatalogEnabled,
+    experimentalModelCatalogModels,
+    experimentalModelCatalogDefaultModelId:
+      experimentalModelCatalogDefaultModelId ?? null,
+  });
+}
+
 export async function saveCodexInstanceConfiguration(payload: {
   instanceId: string;
   name?: string;

@@ -397,6 +397,9 @@ pub struct UserConfig {
     /// 切换 Codex 时是否自动启动/重启 Codex App
     #[serde(default = "default_codex_launch_on_switch")]
     pub codex_launch_on_switch: bool,
+    /// 启动时是否自动恢复 Codex 代理接管状态
+    #[serde(default = "default_codex_auto_restore_takeover_on_launch")]
+    pub codex_auto_restore_takeover_on_launch: bool,
     /// 切换 Antigravity IDE 时是否自动启动/重启应用
     #[serde(default = "default_antigravity_launch_on_switch")]
     pub antigravity_launch_on_switch: bool,
@@ -1010,6 +1013,9 @@ fn default_hermes_auth_overwrite_on_switch() -> bool {
 fn default_codex_launch_on_switch() -> bool {
     true
 }
+fn default_codex_auto_restore_takeover_on_launch() -> bool {
+    true
+}
 fn default_antigravity_launch_on_switch() -> bool {
     true
 }
@@ -1291,6 +1297,8 @@ impl Default for UserConfig {
             openclaw_auth_overwrite_on_switch: default_openclaw_auth_overwrite_on_switch(),
             hermes_auth_overwrite_on_switch: default_hermes_auth_overwrite_on_switch(),
             codex_launch_on_switch: default_codex_launch_on_switch(),
+            codex_auto_restore_takeover_on_launch:
+                default_codex_auto_restore_takeover_on_launch(),
             antigravity_launch_on_switch: default_antigravity_launch_on_switch(),
             codex_restart_specified_app_on_switch: default_codex_restart_specified_app_on_switch(),
             codex_local_access_entry_visible: default_codex_local_access_entry_visible(),

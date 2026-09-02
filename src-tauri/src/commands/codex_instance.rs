@@ -18,7 +18,7 @@ use crate::models::{
 };
 use crate::modules;
 
-const DEFAULT_INSTANCE_ID: &str = "__default__";
+pub(crate) const DEFAULT_INSTANCE_ID: &str = "__default__";
 const CODEX_INSTANCE_LAUNCH_PROGRESS_EVENT: &str = "codex:instance-launch-progress";
 static CODEX_INSTANCE_STARTS_IN_PROGRESS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static CODEX_INSTANCE_START_CANCEL_REQUESTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -122,14 +122,14 @@ impl Drop for CodexInstanceStartGuard {
 }
 
 #[derive(Debug, Clone)]
-struct CodexInstanceStartTarget {
-    instance_id: String,
-    instance_name: String,
-    user_data_dir: PathBuf,
-    bind_account_id: Option<String>,
-    model_routing: Option<CodexInstanceModelRouting>,
-    is_default: bool,
-    launch_operation: Option<String>,
+pub(crate) struct CodexInstanceStartTarget {
+    pub(crate) instance_id: String,
+    pub(crate) instance_name: String,
+    pub(crate) user_data_dir: PathBuf,
+    pub(crate) bind_account_id: Option<String>,
+    pub(crate) model_routing: Option<CodexInstanceModelRouting>,
+    pub(crate) is_default: bool,
+    pub(crate) launch_operation: Option<String>,
 }
 
 fn emit_codex_instance_launch_progress(
@@ -185,7 +185,7 @@ fn emit_codex_instance_launch_step(
     );
 }
 
-fn resolve_codex_instance_start_target(
+pub(crate) fn resolve_codex_instance_start_target(
     instance_id: &str,
 ) -> Result<CodexInstanceStartTarget, String> {
     if instance_id == DEFAULT_INSTANCE_ID {
@@ -1325,6 +1325,201 @@ mod tests {
         assert_eq!(restored.app_speed, CodexAppSpeed::Standard);
     }
 
+    fn save_instance_with_quick_config(
+        env: &TestDataDirGuard,
+        instance_id: &str,
+        context_window: Option<i64>,
+        auto_compact_token_limit: Option<i64>,
+    ) -> PathBuf {
+        let profile_dir = env.root.join(instance_id);
+        std::fs::create_dir_all(&profile_dir).expect("create profile dir");
+        std::fs::write(profile_dir.join("config.toml"), "model = \"gpt-5\"\n")
+            .expect("write base config");
+        modules::codex_account::save_quick_config_for_base_dir_with_default(
+            &profile_dir,
+            context_window,
+            auto_compact_token_limit,
+            Some(false),
+            Some(test_experimental_models()),
+            None,
+        )
+        .expect("write context config");
+
+        let mut store = crate::models::InstanceStore::new();
+        store.instances.push(InstanceProfile {
+            id: instance_id.to_string(),
+            name: "Context preservation test".to_string(),
+            user_data_dir: profile_dir.to_string_lossy().to_string(),
+            working_dir: None,
+            extra_args: String::new(),
+            bind_account_id: None,
+            model_routing: None,
+            launch_mode: InstanceLaunchMode::App,
+            app_speed: CodexAppSpeed::Standard,
+            created_at: 1,
+            last_launched_at: None,
+            last_pid: None,
+        });
+        modules::codex_instance::save_instance_store(&store).expect("save instance store");
+        profile_dir
+    }
+
+    fn test_experimental_models() -> Vec<CodexExperimentalModelDefinition> {
+        vec![CodexExperimentalModelDefinition {
+            model_id: "gpt-5".to_string(),
+            display_name: "GPT-5".to_string(),
+            reasoning_efforts: None,
+            context_window: None,
+            auto_compact_token_limit: None,
+        }]
+    }
+
+    #[tokio::test]
+    async fn instance_configuration_save_preserves_context_window_settings() {
+        let _lock = crate::modules::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let env = TestDataDirGuard::new("cockpit-codex-configuration-context-preservation");
+        let instance_id = "context-preservation-instance";
+        let profile_dir =
+            save_instance_with_quick_config(&env, instance_id, Some(1_000_000), Some(900_000));
+
+        let saved = codex_save_instance_configuration(
+            instance_id.to_string(),
+            None,
+            None,
+            None,
+            None,
+            Some(Some(CodexInstanceModelRouting::default())),
+            None,
+            None,
+            None,
+            None,
+            Some(true),
+            false,
+            test_experimental_models(),
+            None,
+        )
+        .await
+        .expect("save instance configuration");
+
+        let content =
+            std::fs::read_to_string(profile_dir.join("config.toml")).expect("read saved config");
+        assert!(content.contains("model_context_window = 1000000"));
+        assert!(content.contains("model_auto_compact_token_limit = 900000"));
+        assert_eq!(
+            saved.quick_config.detected_model_context_window,
+            Some(1_000_000)
+        );
+        assert_eq!(
+            saved.quick_config.detected_auto_compact_token_limit,
+            Some(900_000)
+        );
+    }
+
+    #[tokio::test]
+    async fn instance_configuration_save_catalog_only_context_preservation() {
+        let _lock = crate::modules::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let env = TestDataDirGuard::new("cockpit-codex-catalog-context-preservation");
+        let instance_id = "catalog-context-preservation-instance";
+        let profile_dir =
+            save_instance_with_quick_config(&env, instance_id, Some(750_000), Some(640_000));
+
+        let saved = codex_save_instance_model_catalog(
+            instance_id.to_string(),
+            true,
+            test_experimental_models(),
+            None,
+        )
+        .await
+        .expect("save instance model catalog");
+
+        let content =
+            std::fs::read_to_string(profile_dir.join("config.toml")).expect("read saved config");
+        assert!(content.contains("model_context_window = 750000"));
+        assert!(content.contains("model_auto_compact_token_limit = 640000"));
+        assert_eq!(saved.detected_model_context_window, Some(750_000));
+        assert_eq!(saved.detected_auto_compact_token_limit, Some(640_000));
+    }
+
+    #[tokio::test]
+    async fn instance_configuration_save_keeps_default_context_unset() {
+        let _lock = crate::modules::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let env = TestDataDirGuard::new("cockpit-codex-configuration-default-context");
+        let instance_id = "default-context-instance";
+        let profile_dir = save_instance_with_quick_config(&env, instance_id, None, None);
+
+        let saved = codex_save_instance_configuration(
+            instance_id.to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            test_experimental_models(),
+            None,
+        )
+        .await
+        .expect("save instance configuration");
+
+        let content =
+            std::fs::read_to_string(profile_dir.join("config.toml")).expect("read saved config");
+        assert!(!content.contains("model_context_window"));
+        assert!(!content.contains("model_auto_compact_token_limit"));
+        assert_eq!(saved.quick_config.detected_model_context_window, None);
+        assert_eq!(saved.quick_config.detected_auto_compact_token_limit, None);
+    }
+
+    #[tokio::test]
+    async fn failed_instance_configuration_save_restores_context_window_settings() {
+        let _lock = crate::modules::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let env = TestDataDirGuard::new("cockpit-codex-configuration-context-rollback");
+        let instance_id = "context-rollback-instance";
+        let profile_dir =
+            save_instance_with_quick_config(&env, instance_id, Some(516_000), Some(460_000));
+        let invalid_routing = CodexInstanceModelRouting {
+            enabled: true,
+            ..CodexInstanceModelRouting::default()
+        };
+
+        let error = codex_save_instance_configuration(
+            instance_id.to_string(),
+            None,
+            None,
+            None,
+            None,
+            Some(Some(invalid_routing)),
+            None,
+            None,
+            None,
+            None,
+            Some(true),
+            true,
+            test_experimental_models(),
+            None,
+        )
+        .await
+        .expect_err("invalid routing should fail");
+
+        assert!(error.contains("OAuth"));
+        let content = std::fs::read_to_string(profile_dir.join("config.toml"))
+            .expect("read rolled back config");
+        assert!(content.contains("model_context_window = 516000"));
+        assert!(content.contains("model_auto_compact_token_limit = 460000"));
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_terminal_probe_detects_wt_exe_on_path() {
@@ -1834,6 +2029,30 @@ pub async fn codex_save_instance_quick_config(
     Ok(saved)
 }
 
+#[tauri::command]
+pub async fn codex_save_instance_model_catalog(
+    instance_id: String,
+    experimental_model_catalog_enabled: bool,
+    experimental_model_catalog_models: Vec<crate::models::codex::CodexExperimentalModelDefinition>,
+    experimental_model_catalog_default_model_id: Option<String>,
+) -> Result<crate::models::codex::CodexQuickConfig, String> {
+    let base_dir = resolve_instance_base_dir(instance_id.as_str())?;
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        let saved = modules::codex_account::save_model_catalog_for_base_dir_preserving_context(
+            &base_dir,
+            experimental_model_catalog_enabled,
+            experimental_model_catalog_models,
+            experimental_model_catalog_default_model_id,
+        )?;
+        modules::codex_local_access::refresh_api_service_experimental_model_ids();
+        Ok::<crate::models::codex::CodexQuickConfig, String>(saved)
+    })
+    .await
+    .map_err(|error| format!("保存 Codex 实例可见模型后台任务失败: {}", error))??;
+    modules::codex_local_access::trigger_gateway_reload_in_background("实验模型目录已更新");
+    Ok(saved)
+}
+
 /// Save the instance record and its managed model catalog as one compensated transaction.
 /// The quick-config write happens first because `codex_update_instance` already rolls its own
 /// routing changes back. If the instance update fails, this command restores the old catalog.
@@ -1855,12 +2074,10 @@ pub async fn codex_save_instance_configuration(
     experimental_model_catalog_default_model_id: Option<String>,
 ) -> Result<CodexInstanceConfigurationSaveResult, String> {
     let previous_quick_config = codex_get_instance_quick_config(instance_id.clone()).await?;
-    let saved_quick_config = codex_save_instance_quick_config(
+    let saved_quick_config = codex_save_instance_model_catalog(
         instance_id.clone(),
-        None,
-        None,
-        Some(experimental_model_catalog_enabled),
-        Some(experimental_model_catalog_models),
+        experimental_model_catalog_enabled,
+        experimental_model_catalog_models,
         experimental_model_catalog_default_model_id,
     )
     .await?;
@@ -3429,6 +3646,74 @@ pub(crate) async fn codex_start_default_with_prepared_profile(
         );
     }
     clear_codex_instance_start_cancel(DEFAULT_INSTANCE_ID);
+    result
+}
+
+/// 启动已经由 API Service 激活流程准备好 profile 的非默认实例。
+/// 调用方必须在整个“凭据写入 + 实例启动”期间持有目标 profile 写入租约。
+pub(crate) async fn codex_start_instance_with_prepared_profile(
+    app: AppHandle,
+    instance_id: String,
+    emit_launch_progress: bool,
+    launch_operation: Option<&str>,
+    skip_failed_step: Option<&str>,
+) -> Result<CodexInstanceProfileView, String> {
+    let launch_target = resolve_codex_instance_start_target(&instance_id)?;
+    let result = codex_start_instance_internal(
+        app.clone(),
+        instance_id.clone(),
+        false,
+        false,
+        skip_failed_step,
+        emit_launch_progress,
+        launch_operation,
+    )
+    .await;
+    let result = match result {
+        Ok(profile) => Ok(profile),
+        Err(error) => {
+            let auth_account_id = if launch_target
+                .bind_account_id
+                .as_deref()
+                .is_some_and(modules::codex_instance::is_api_service_bind_account_id)
+            {
+                modules::codex_local_access::bound_oauth_account_id_for_instance_start()
+                    .await
+                    .ok()
+                    .flatten()
+            } else {
+                modules::codex_account::oauth_account_id_for_runtime_binding(
+                    launch_target.bind_account_id.as_deref(),
+                )
+                .or_else(|| {
+                    modules::codex_account::oauth_account_id_for_runtime_dir(
+                        &launch_target.user_data_dir,
+                    )
+                })
+            };
+            Err(auth_account_id
+                .as_deref()
+                .map(|account_id| {
+                    modules::codex_account::format_account_switch_error(account_id, error.clone())
+                })
+                .unwrap_or(error))
+        }
+    };
+    if let Err(error) = &result {
+        let cancelled = error == "CODEX_START_CANCELLED";
+        emit_codex_instance_launch_progress(
+            &app,
+            emit_launch_progress,
+            &launch_target,
+            serde_json::json!({
+                "type": if cancelled { "cancelled" } else { "error" },
+                "error": error,
+                "cancelled": cancelled,
+                "canRetry": !cancelled && !error.starts_with("CODEX_SWITCH_AUTH_REQUIRED:"),
+            }),
+        );
+    }
+    clear_codex_instance_start_cancel(&instance_id);
     result
 }
 

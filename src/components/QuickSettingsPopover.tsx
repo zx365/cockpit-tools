@@ -344,11 +344,6 @@ interface QuickSettingsPopoverProps {
 const AUTO_SWITCH_SCOPE_ALL_ACCOUNTS: AutoSwitchAccountScopeMode = 'all_accounts';
 const AUTO_SWITCH_SCOPE_SELECTED_ACCOUNTS: AutoSwitchAccountScopeMode = 'selected_accounts';
 const CURRENT_ACCOUNT_REFRESH_PRESETS = ['1', '2', '5', '10', '15'];
-interface CodexQuickConfigTarget {
-  modelContextWindow: number | null;
-  autoCompactTokenLimit: number | null;
-}
-
 const getCurrentAccountRefreshPlatformForType = (
   platformType: QuickSettingsType,
 ): CurrentAccountRefreshPlatform => {
@@ -604,7 +599,6 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
 
   const persistCodexQuickConfig = useCallback(
     (
-      target: CodexQuickConfigTarget,
       experimentalModelCatalogEnabled: boolean,
       experimentalModels: CodexExperimentalModelDefinition[],
       experimentalDefaultModelId: string | null,
@@ -619,9 +613,7 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
 
       const save = async () => {
         try {
-          const saved = await codexService.saveCodexQuickConfig(
-            target.modelContextWindow ?? undefined,
-            target.autoCompactTokenLimit ?? undefined,
+          const saved = await codexService.saveCodexModelCatalog(
             experimentalModelCatalogEnabled,
             experimentalModels,
             experimentalDefaultModelId,
@@ -676,10 +668,6 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
     }
     const timer = window.setTimeout(() => {
       persistCodexQuickConfig(
-        {
-          modelContextWindow: null,
-          autoCompactTokenLimit: null,
-        },
         codexExperimentalModelCatalogEnabled,
         codexExperimentalModels,
         codexExperimentalDefaultModelId,
@@ -2028,15 +2016,12 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
                           type="checkbox"
                           checked={codexExperimentalModelCatalogEnabled}
                           onChange={(event) => {
+                            if (!codexQuickConfig) return;
                             const enabled = event.target.checked;
                             setCodexQuickConfigError(null);
                             setCodexQuickConfigNotice(null);
                             setCodexExperimentalModelCatalogEnabled(enabled);
                             persistCodexQuickConfig(
-                              {
-                                modelContextWindow: null,
-                                autoCompactTokenLimit: null,
-                              },
                               enabled,
                               codexExperimentalModelsError
                                 ? (codexQuickConfig?.experimental_model_catalog_models ?? [])

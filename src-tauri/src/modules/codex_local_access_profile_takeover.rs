@@ -404,80 +404,65 @@ fn remove_codex_local_access_config(config_text: &str) -> Result<String, String>
     {
         let _ = doc.remove("model_catalog_json");
     }
-    let should_remove_model_providers = doc
-        .get_mut("model_providers")
-        .and_then(|item| item.as_table_mut())
-        .map(|model_providers| {
-            if let Some(provider) = model_providers
-                .get_mut(CODEX_LOCAL_ACCESS_RUNTIME_PROVIDER_ID)
-                .and_then(|item| item.as_table_mut())
-            {
-                for key in [
-                    "name",
-                    "base_url",
-                    "wire_api",
-                    "requires_openai_auth",
-                    "experimental_bearer_token",
-                    "supports_websockets",
-                ] {
-                    let _ = provider.remove(key);
-                }
-                let remove_headers = provider
-                    .get_mut("http_headers")
-                    .map(|headers| {
-                        if let Some(headers) = headers.as_inline_table_mut() {
-                            let managed_keys = headers
-                                .iter()
-                                .filter(|(key, _)| {
-                                    key.eq_ignore_ascii_case(CODEX_IMAGEGEN_ACTOR_HEADER)
-                                        || key.eq_ignore_ascii_case(
-                                            CODEX_LOCAL_ACCESS_DISABLE_HOSTED_IMAGE_GENERATION_HEADER,
-                                        )
-                                        || key.eq_ignore_ascii_case(
-                                            codex_account::CODEX_CLIENT_INSTANCE_ID_HEADER,
-                                        )
-                                })
-                                .map(|(key, _)| key.to_string())
-                                .collect::<Vec<_>>();
-                            for key in managed_keys {
-                                let _ = headers.remove(&key);
-                            }
-                            headers.is_empty()
-                        } else if let Some(headers) = headers.as_table_mut() {
-                            let managed_keys = headers
-                                .iter()
-                                .filter(|(key, _)| {
-                                    key.eq_ignore_ascii_case(CODEX_IMAGEGEN_ACTOR_HEADER)
-                                        || key.eq_ignore_ascii_case(
-                                            CODEX_LOCAL_ACCESS_DISABLE_HOSTED_IMAGE_GENERATION_HEADER,
-                                        )
-                                        || key.eq_ignore_ascii_case(
-                                            codex_account::CODEX_CLIENT_INSTANCE_ID_HEADER,
-                                        )
-                                })
-                                .map(|(key, _)| key.to_string())
-                                .collect::<Vec<_>>();
-                            for key in managed_keys {
-                                let _ = headers.remove(&key);
-                            }
-                            headers.is_empty()
-                        } else {
-                            false
+
+    // 保留 [model_providers.codex_local_access] 基础结构供历史会话回放，仅清理受管临时 headers
+    if let Some(model_providers) = doc.get_mut("model_providers").and_then(|item| item.as_table_mut()) {
+        if let Some(provider) = model_providers
+            .get_mut(CODEX_LOCAL_ACCESS_RUNTIME_PROVIDER_ID)
+            .and_then(|item| item.as_table_mut())
+        {
+            // The bearer token is generated and managed by Cockpit's takeover;
+            // keep the provider definition for history replay, but never leave
+            // the temporary credential active after detaching the takeover.
+            let _ = provider.remove("experimental_bearer_token");
+            let remove_headers = provider
+                .get_mut("http_headers")
+                .map(|headers| {
+                    if let Some(headers) = headers.as_inline_table_mut() {
+                        let managed_keys = headers
+                            .iter()
+                            .filter(|(key, _)| {
+                                key.eq_ignore_ascii_case(CODEX_IMAGEGEN_ACTOR_HEADER)
+                                    || key.eq_ignore_ascii_case(
+                                        CODEX_LOCAL_ACCESS_DISABLE_HOSTED_IMAGE_GENERATION_HEADER,
+                                    )
+                                    || key.eq_ignore_ascii_case(
+                                        codex_account::CODEX_CLIENT_INSTANCE_ID_HEADER,
+                                    )
+                            })
+                            .map(|(key, _)| key.to_string())
+                            .collect::<Vec<_>>();
+                        for key in managed_keys {
+                            let _ = headers.remove(&key);
                         }
-                    })
-                    .unwrap_or(false);
-                if remove_headers {
-                    let _ = provider.remove("http_headers");
-                }
-                if provider.is_empty() {
-                    let _ = model_providers.remove(CODEX_LOCAL_ACCESS_RUNTIME_PROVIDER_ID);
-                }
+                        headers.is_empty()
+                    } else if let Some(headers) = headers.as_table_mut() {
+                        let managed_keys = headers
+                            .iter()
+                            .filter(|(key, _)| {
+                                key.eq_ignore_ascii_case(CODEX_IMAGEGEN_ACTOR_HEADER)
+                                    || key.eq_ignore_ascii_case(
+                                        CODEX_LOCAL_ACCESS_DISABLE_HOSTED_IMAGE_GENERATION_HEADER,
+                                    )
+                                    || key.eq_ignore_ascii_case(
+                                        codex_account::CODEX_CLIENT_INSTANCE_ID_HEADER,
+                                    )
+                            })
+                            .map(|(key, _)| key.to_string())
+                            .collect::<Vec<_>>();
+                        for key in managed_keys {
+                            let _ = headers.remove(&key);
+                        }
+                        headers.is_empty()
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if remove_headers {
+                let _ = provider.remove("http_headers");
             }
-            model_providers.is_empty()
-        })
-        .unwrap_or(false);
-    if should_remove_model_providers {
-        let _ = doc.remove("model_providers");
+        }
     }
 
     Ok(crate::modules::codex_config_format::codex_config_doc_to_string(&mut doc))
@@ -953,4 +938,3 @@ fn restore_takeover_profiles_after_disable(
 
     Ok(())
 }
-

@@ -598,11 +598,12 @@ fn codex_launch_credential_snapshot_for_account_id(
         .map(|account| codex_launch_credential_snapshot_for_account(&account, source_prefix))
 }
 
-fn read_current_codex_launch_credential_snapshot() -> Option<CodexLaunchCredentialSnapshot> {
-    let codex_home = codex_account::get_codex_home();
-    if let Some(account_id) =
-        codex_account::read_managed_projection_account_id_from_dir(&codex_home)
-    {
+fn read_codex_launch_credential_snapshot_for_dir(
+    base_dir: &Path,
+    bind_account_id: Option<&str>,
+    include_current_index: bool,
+) -> Option<CodexLaunchCredentialSnapshot> {
+    if let Some(account_id) = codex_account::read_managed_projection_account_id_from_dir(base_dir) {
         if let Some(snapshot) =
             codex_launch_credential_snapshot_for_account_id(&account_id, "profile:")
         {
@@ -610,19 +611,37 @@ fn read_current_codex_launch_credential_snapshot() -> Option<CodexLaunchCredenti
         }
     }
 
-    if let Ok(settings) = crate::modules::codex_instance::load_default_settings() {
-        if let Some(bind_account_id) = settings.bind_account_id.as_deref() {
-            if let Some(snapshot) =
-                codex_launch_credential_snapshot_for_account_id(bind_account_id, "default-bind:")
-            {
-                return Some(snapshot);
-            }
+    // The official client may keep the current OAuth snapshot in Keychain or its
+    // profile auth store even when the managed projection marker is missing.
+    // Prefer that runtime evidence before falling back to the instance binding.
+    if let Some(account_id) = codex_account::oauth_account_id_for_runtime_dir(base_dir) {
+        if let Some(snapshot) =
+            codex_launch_credential_snapshot_for_account_id(&account_id, "runtime-oauth:")
+        {
+            return Some(snapshot);
         }
     }
 
-    codex_account::get_current_account()
-        .as_ref()
-        .map(|account| codex_launch_credential_snapshot_for_account(account, "current-index:"))
+    if let Some(bind_account_id) = bind_account_id {
+        if let Some(snapshot) =
+            codex_launch_credential_snapshot_for_account_id(bind_account_id, "bind:")
+        {
+            return Some(snapshot);
+        }
+    }
+
+    include_current_index
+        .then(codex_account::get_current_account)
+        .flatten()
+        .map(|account| codex_launch_credential_snapshot_for_account(&account, "current-index:"))
+}
+
+fn read_current_codex_launch_credential_snapshot() -> Option<CodexLaunchCredentialSnapshot> {
+    let codex_home = codex_account::get_codex_home();
+    let bind_account_id = crate::modules::codex_instance::load_default_settings()
+        .ok()
+        .and_then(|settings| settings.bind_account_id);
+    read_codex_launch_credential_snapshot_for_dir(&codex_home, bind_account_id.as_deref(), true)
 }
 
 fn repair_codex_session_visibility_after_credential_kind_change(
@@ -757,6 +776,27 @@ pub async fn save_codex_quick_config(
     })
     .await
     .map_err(|error| format!("保存 Codex 快捷配置后台任务失败: {}", error))??;
+    crate::modules::codex_local_access::trigger_gateway_reload_in_background("实验模型目录已更新");
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn save_codex_model_catalog(
+    experimental_model_catalog_enabled: bool,
+    experimental_model_catalog_models: Vec<crate::models::codex::CodexExperimentalModelDefinition>,
+    experimental_model_catalog_default_model_id: Option<String>,
+) -> Result<CodexQuickConfig, String> {
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        let saved = codex_account::save_current_model_catalog_preserving_context(
+            experimental_model_catalog_enabled,
+            experimental_model_catalog_models,
+            experimental_model_catalog_default_model_id,
+        )?;
+        crate::modules::codex_local_access::refresh_api_service_experimental_model_ids();
+        Ok::<CodexQuickConfig, String>(saved)
+    })
+    .await
+    .map_err(|error| format!("保存 Codex 可见模型后台任务失败: {}", error))??;
     crate::modules::codex_local_access::trigger_gateway_reload_in_background("实验模型目录已更新");
     Ok(saved)
 }
@@ -2395,6 +2435,23 @@ pub async fn codex_wakeup_run_enabled_tasks(
 ) -> Result<u32, String> {
     let trigger = trigger_type.unwrap_or_else(|| "startup".to_string());
     codex_wakeup_scheduler::run_enabled_tasks_now(Some(&app), &trigger).await
+}
+
+/// 启动时根据配置自动恢复可见模型目录与代理接管状态
+#[tauri::command]
+pub async fn restore_codex_active_takeover_if_enabled(app: AppHandle) -> Result<bool, String> {
+    let cfg = config::get_user_config();
+    if !cfg.codex_auto_restore_takeover_on_launch {
+        return Ok(false);
+    }
+    let base_dir = codex_account::get_codex_home();
+    let reapply_catalog_result =
+        codex_account::reapply_experimental_model_policy_if_enabled(&base_dir)?;
+    logger::log_info(&format!(
+        "[Codex Auto-Restore] restore_codex_active_takeover_if_enabled executed: reapply_catalog={}",
+        reapply_catalog_result
+    ));
+    Ok(reapply_catalog_result)
 }
 
 // ─── Codex 账号分组持久化 ────────────────────────────────────────────

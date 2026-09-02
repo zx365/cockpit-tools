@@ -22,7 +22,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useEscClose } from "../../hooks/useEscClose";
 import {
-  saveCodexInstanceQuickConfig,
+  saveCodexInstanceModelCatalog,
   saveCodexInstanceConfiguration,
   getCodexInstanceQuickConfig,
 } from "../../services/codexInstanceService";
@@ -413,10 +413,8 @@ export function CodexLaunchPreviewModal({
               experimentalModelCatalogDefaultModelId: defaultModelId,
             })
           ).quickConfig
-        : await saveCodexInstanceQuickConfig(
+        : await saveCodexInstanceModelCatalog(
             instanceId,
-            undefined,
-            undefined,
             nextCatalogEnabled,
             nextModels,
             defaultModelId,

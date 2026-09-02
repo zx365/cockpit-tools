@@ -73,6 +73,40 @@
     }
 
     #[test]
+    fn quick_config_catalog_only_context_preservation_keeps_latest_values() {
+        let base_dir = make_temp_dir("codex-catalog-context-preservation-test");
+        let config_path = base_dir.join("config.toml");
+        fs::write(
+            &config_path,
+            "model_context_window = 750000\nmodel_auto_compact_token_limit = 640000\nmodel = \"gpt-5\"\n",
+        )
+        .expect("write config");
+        let models = vec![CodexExperimentalModelDefinition {
+            model_id: "gpt-5".to_string(),
+            display_name: "GPT-5".to_string(),
+            reasoning_efforts: None,
+            context_window: None,
+            auto_compact_token_limit: None,
+        }];
+
+        let result = super::save_model_catalog_for_base_dir_preserving_context(
+            &base_dir,
+            true,
+            models,
+            None,
+        )
+        .expect("save model catalog");
+
+        let content = fs::read_to_string(&config_path).expect("read config");
+        assert!(content.contains("model_context_window = 750000"));
+        assert!(content.contains("model_auto_compact_token_limit = 640000"));
+        assert_eq!(result.detected_model_context_window, Some(750_000));
+        assert_eq!(result.detected_auto_compact_token_limit, Some(640_000));
+
+        fs::remove_dir_all(&base_dir).expect("cleanup temp dir");
+    }
+
+    #[test]
     fn quick_config_can_write_custom_context_window_and_compact_limit() {
         let base_dir = make_temp_dir("codex-quick-config-custom-write-test");
         let config_path = base_dir.join("config.toml");
@@ -415,6 +449,70 @@
         )
         .expect("parse model config");
         assert_eq!(catalog_config["default_model_id"], "custom-model");
+
+        fs::remove_dir_all(&base_dir).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn quick_config_restores_model_selected_before_experimental_default() {
+        let base_dir = make_temp_dir("codex-experimental-restore-selected-model-test");
+        fs::write(base_dir.join("config.toml"), "model = \"gpt-original\"\n")
+            .expect("write config");
+        let models = vec![CodexExperimentalModelDefinition {
+            model_id: "custom-model".to_string(),
+            display_name: "Custom Model".to_string(),
+            reasoning_efforts: None,
+            context_window: None,
+            auto_compact_token_limit: None,
+        }];
+
+        write_quick_config_to_config_toml_with_default(
+            &base_dir,
+            None,
+            None,
+            Some(true),
+            Some(models),
+            Some("custom-model".to_string()),
+        )
+        .expect("enable experimental catalog");
+        write_quick_config_to_config_toml(&base_dir, None, None, Some(false), None)
+            .expect("disable experimental catalog");
+
+        let config = fs::read_to_string(base_dir.join("config.toml")).expect("read config");
+        assert!(config.contains("model = \"gpt-original\""));
+        assert!(!config.contains("model = \"custom-model\""));
+
+        fs::remove_dir_all(&base_dir).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn quick_config_removes_experimental_default_when_model_was_unset() {
+        let base_dir = make_temp_dir("codex-experimental-restore-unset-model-test");
+        fs::write(base_dir.join("config.toml"), "approval_policy = \"on-request\"\n")
+            .expect("write config");
+        let models = vec![CodexExperimentalModelDefinition {
+            model_id: "custom-model".to_string(),
+            display_name: "Custom Model".to_string(),
+            reasoning_efforts: None,
+            context_window: None,
+            auto_compact_token_limit: None,
+        }];
+
+        write_quick_config_to_config_toml_with_default(
+            &base_dir,
+            None,
+            None,
+            Some(true),
+            Some(models),
+            Some("custom-model".to_string()),
+        )
+        .expect("enable experimental catalog");
+        write_quick_config_to_config_toml(&base_dir, None, None, Some(false), None)
+            .expect("disable experimental catalog");
+
+        let config = fs::read_to_string(base_dir.join("config.toml")).expect("read config");
+        assert!(config.contains("approval_policy = \"on-request\""));
+        assert!(!config.contains("model = "));
 
         fs::remove_dir_all(&base_dir).expect("cleanup temp dir");
     }
@@ -881,4 +979,33 @@ wire_api = "responses"
         assert_eq!(groups[0].policy(), CodexGroupQuotaRefreshPolicy::Disabled);
         assert_eq!(groups[1].policy(), CodexGroupQuotaRefreshPolicy::Minutes(5));
         assert_eq!(groups[2].policy(), CodexGroupQuotaRefreshPolicy::Disabled);
+    }
+
+    #[test]
+    fn auto_restore_on_launch_reapplies_catalog_and_preserves_1m_context_window() {
+        let base_dir = make_temp_dir("codex-auto-restore-launch-test");
+        let initial_config = "model = \"gpt-5.6-sol\"\nmodel_context_window = 1000000\nmodel_auto_compact_token_limit = 900000\n";
+        fs::write(base_dir.join("config.toml"), initial_config).expect("write initial config");
+        write_quick_config_to_config_toml(&base_dir, None, None, Some(true), None)
+            .expect("enable experimental catalog");
+
+        // 模拟退出接管后
+        fs::write(
+            base_dir.join("config.toml"),
+            "model = \"gpt-5.6-sol\"\nmodel_context_window = 1000000\nmodel_auto_compact_token_limit = 900000\n",
+        )
+        .expect("write unattached config");
+
+        // 模拟启动自动恢复
+        assert!(
+            super::reapply_experimental_model_policy_if_enabled(&base_dir)
+                .expect("reapply experimental policy")
+        );
+
+        let restored_config = fs::read_to_string(base_dir.join("config.toml")).expect("read restored config");
+        assert!(restored_config.contains("model_context_window = 1000000"));
+        assert!(restored_config.contains("model_auto_compact_token_limit = 900000"));
+        assert!(restored_config.contains("model_catalog_json = \"cockpit-model-catalog.json\""));
+
+        fs::remove_dir_all(&base_dir).expect("cleanup temp dir");
     }

@@ -826,6 +826,11 @@ function MainApp() {
     };
   }, []);
 
+  // 冷启动：根据用户配置自动恢复 Codex 代理接管状态
+  useEffect(() => {
+    void useCodexAccountStore.getState().restoreActiveTakeoverIfNeeded();
+  }, []);
+
   // 主窗口切到某平台页（如 Grok）时，同步悬浮窗/菜单栏当前平台，避免一直停在默认 antigravity
   useEffect(() => {
     const platformId = resolvePlatformIdFromPage(page);

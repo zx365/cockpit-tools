@@ -22,6 +22,8 @@ export function SettingsCodexPlatformPanel(props: SettingsPageViewProps) {
     codexHideRelayQuota,
     codexLaunchCandidates,
     codexLaunchOnSwitch,
+    codexAutoRestoreTakeoverOnLaunch,
+    setCodexAutoRestoreTakeoverOnLaunch,
     codexLocalAccessEntryVisible,
     codexQuotaAlertEnabled,
     codexQuotaAlertThreshold,
@@ -334,6 +336,33 @@ export function SettingsCodexPlatformPanel(props: SettingsPageViewProps) {
                       type="checkbox"
                       checked={codexLaunchOnSwitch}
                       onChange={(e) => setCodexLaunchOnSwitch(e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="row-label">
+                  <div className="row-title">
+                    {t(
+                      'settings.general.codexAutoRestoreTakeoverOnLaunch',
+                      '启动时自动恢复 Codex 代理接管',
+                    )}
+                  </div>
+                  <div className="row-desc">
+                    {t(
+                      'settings.general.codexAutoRestoreTakeoverOnLaunchDesc',
+                      '工具启动时自动恢复上次的可见模型与代理接管，保持 1M 上下文且无需手动切换',
+                    )}
+                  </div>
+                </div>
+                <div className="row-control">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={codexAutoRestoreTakeoverOnLaunch}
+                      onChange={(e) => setCodexAutoRestoreTakeoverOnLaunch(e.target.checked)}
                     />
                     <span className="slider"></span>
                   </label>

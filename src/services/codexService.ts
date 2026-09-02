@@ -70,6 +70,19 @@ export async function saveCodexQuickConfig(
   });
 }
 
+/** 保存 Codex 可见模型，不修改当前上下文窗口配置。 */
+export async function saveCodexModelCatalog(
+  experimentalModelCatalogEnabled: boolean,
+  experimentalModelCatalogModels: CodexExperimentalModelDefinition[],
+  experimentalModelCatalogDefaultModelId?: string | null,
+): Promise<CodexQuickConfig> {
+  return await invoke('save_codex_model_catalog', {
+    experimentalModelCatalogEnabled,
+    experimentalModelCatalogModels,
+    experimentalModelCatalogDefaultModelId: experimentalModelCatalogDefaultModelId ?? null,
+  });
+}
+
 /** 获取 Codex 官方 App 速度配置 */
 export async function getCodexAppSpeedConfig(): Promise<CodexAppSpeedConfig> {
   return await invoke('get_codex_app_speed_config');
@@ -704,4 +717,13 @@ export async function fetchCodexAccountNoteMailUrl(
   mailUrl: string,
 ): Promise<CodexMailPreviewFetchResult> {
   return await invoke('fetch_codex_account_note_mail_url', { mailUrl });
+}
+
+export async function restoreCodexActiveTakeoverIfEnabled(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('restore_codex_active_takeover_if_enabled');
+  } catch (e) {
+    console.warn('[Codex Auto-Restore] 恢复代理接管失败:', e);
+    return false;
+  }
 }

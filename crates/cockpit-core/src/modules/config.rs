@@ -275,6 +275,9 @@ pub struct UserConfig {
     /// 切换 Codex 时是否自动启动/重启 Codex App
     #[serde(default = "default_codex_launch_on_switch")]
     pub codex_launch_on_switch: bool,
+    /// 启动时是否自动恢复 Codex 代理接管状态
+    #[serde(default = "default_codex_auto_restore_takeover_on_launch")]
+    pub codex_auto_restore_takeover_on_launch: bool,
     /// Antigravity 切号是否启用“本地落盘 + 扩展无感”且不重启
     #[serde(default = "default_antigravity_dual_switch_no_restart_enabled")]
     pub antigravity_dual_switch_no_restart_enabled: bool,
@@ -660,6 +663,9 @@ fn default_openclaw_auth_overwrite_on_switch() -> bool {
 fn default_codex_launch_on_switch() -> bool {
     true
 }
+fn default_codex_auto_restore_takeover_on_launch() -> bool {
+    true
+}
 fn default_antigravity_dual_switch_no_restart_enabled() -> bool {
     false
 }
@@ -856,11 +862,13 @@ impl Default for UserConfig {
             ghcp_opencode_auth_overwrite_on_switch: default_ghcp_opencode_auth_overwrite_on_switch(
             ),
             grok_opencode_sync_on_switch: default_grok_opencode_sync_on_switch(),
-            grok_opencode_auth_overwrite_on_switch:
-                default_grok_opencode_auth_overwrite_on_switch(),
+            grok_opencode_auth_overwrite_on_switch: default_grok_opencode_auth_overwrite_on_switch(
+            ),
             ghcp_launch_on_switch: default_ghcp_launch_on_switch(),
             openclaw_auth_overwrite_on_switch: default_openclaw_auth_overwrite_on_switch(),
             codex_launch_on_switch: default_codex_launch_on_switch(),
+            codex_auto_restore_takeover_on_launch:
+                default_codex_auto_restore_takeover_on_launch(),
             antigravity_dual_switch_no_restart_enabled:
                 default_antigravity_dual_switch_no_restart_enabled(),
             auto_switch_enabled: default_auto_switch_enabled(),
@@ -1447,6 +1455,12 @@ pub fn load_user_config() -> Result<UserConfig, String> {
             obj.insert(
                 "codex_auto_switch_selected_account_ids".to_string(),
                 json!(default_codex_auto_switch_selected_account_ids()),
+            );
+        }
+        if !obj.contains_key("codex_auto_restore_takeover_on_launch") {
+            obj.insert(
+                "codex_auto_restore_takeover_on_launch".to_string(),
+                json!(default_codex_auto_restore_takeover_on_launch()),
             );
         }
         let codex_legacy_threshold = obj
